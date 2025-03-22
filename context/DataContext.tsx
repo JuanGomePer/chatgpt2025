@@ -1,5 +1,5 @@
 // app/context/DataContext.tsx
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useState, useEffect, ReactNode, useContext } from 'react';
 import {
   collection,
   getDocs,
@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore/lite';
 import { db } from '@/utils/FireBaseConfig';
 import { Message } from '@/interfaces/AppInterfaces';
-import { getAuth } from 'firebase/auth';
+import { AuthContext } from './AuthContext';
 
 interface DataContextProps {
   chatsList: { id: string; name: string }[];
@@ -41,8 +41,8 @@ export const DataContext = createContext<DataContextProps>({
 });
 
 export const DataProvider = ({ children }: { children: ReactNode }) => {
-  const auth = getAuth();
-  const currentUser = auth.currentUser;
+  // Se obtiene el usuario actual desde AuthContext en lugar de getAuth()
+  const { currentUser } = useContext(AuthContext);
   const [chatsList, setChatsList] = useState<{ id: string; name: string }[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -93,14 +93,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Crear un nuevo chat (localmente, sin crear en Firestore hasta que se envíe el primer mensaje)
+  // Crear un nuevo chat localmente (sin crear en Firestore hasta que se envíe el primer mensaje)
   const createNewChat = () => {
     const newId = "chat_" + Date.now();
     setCurrentChatId(newId);
     setMessages([]);
   };
 
-  // Enviar mensaje (crea el documento si no existe, o lo actualiza)
+  // Enviar mensaje (crea el documento si no existe o lo actualiza)
   const sendMessage = async (text: string) => {
     if (!text.trim() || !currentChatId || !currentUser) return;
     const userMessage: Message = {

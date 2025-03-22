@@ -28,6 +28,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await signOut(auth);
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+      console.log('User logged out');
+      // Aquí puedes manejar redirección si es necesario
+    } catch (error) {
+      console.error('Error during logout:', error);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ currentUser, logout }}>
       {children}

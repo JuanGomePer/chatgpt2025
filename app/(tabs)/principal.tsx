@@ -1,5 +1,5 @@
 // app/(tabs)/principal.tsx
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import {
   View,
   Text,
@@ -15,196 +15,83 @@ import { useRouter } from 'expo-router';
 import Markdown from 'react-native-markdown-display';
 import { APIResponse } from '@/interfaces/Responses';
 import { Message } from '@/interfaces/AppInterfaces';
-
-// Firestore
+import { AuthContext } from '@/context/AuthContext';
+import { DataContext } from '@/context/DataContext';
 import {
   doc,
-  setDoc,
   getDoc,
   updateDoc,
   arrayUnion,
   serverTimestamp,
-  collection,
-  getDocs,
-  query,
-  where
 } from 'firebase/firestore/lite';
 import { db } from '@/utils/FireBaseConfig';
 
-// Firebase Auth
-import { getAuth } from 'firebase/auth';
-
 export default function PrincipalScreen() {
   const router = useRouter();
-  const auth = getAuth();
-  const currentUser = auth.currentUser;
+  const { currentUser, logout } = useContext(AuthContext);
+  const {
+    chatsList,
+    currentChatId,
+    messages,
+    loadChats,
+    selectChat,
+    createNewChat,
+    sendMessage,
+    setMessages,
+  } = useContext(DataContext);
 
-  // Controla si el drawer está abierto/cerrado
+  // Estados locales para controles de interfaz
   const [drawerOpen, setDrawerOpen] = useState(false);
-
-  // Controla si la sección "Chat" está desplegada
   const [chatDropdownOpen, setChatDropdownOpen] = useState(false);
-
-  // Chats existentes en Firestore (filtrados por el usuario actual)
-  const [chatsList, setChatsList] = useState<{ id: string; name: string }[]>([]);
-
-  // Chat seleccionado
-  const [chatId, setChatId] = useState<string | null>(null);
-
-  // Texto actual del input (renombrado de "message" a "inputText")
   const [inputText, setInputText] = useState("Explain how AI works");
-
-  // Estado de carga (para el botón Send)
   const [isLoading, setIsLoading] = useState(false);
 
-  // Historial de mensajes en memoria local
-  const [messages, setMessages] = useState<Message[]>([]);
-
-  useEffect(() => {
-    loadAllChats();
-  }, [currentUser]);
-
-  /** Función para formatear la fecha */
-  const formatDate = (dateValue: any) => {
-    if (dateValue instanceof Date) {
-      return dateValue.toLocaleTimeString();
-    } else if (dateValue && typeof dateValue.toDate === 'function') {
-      return dateValue.toDate().toLocaleTimeString();
-    } else {
-      return new Date(dateValue).toLocaleTimeString();
-    }
-  };
-
-  /** Carga todos los chats del usuario actual */
-  const loadAllChats = async () => {
+  // Función para manejar el cierre de sesión
+  const handleLogout = async () => {
     try {
-      if (!currentUser) return;
-      const q = query(
-        collection(db, 'chats'),
-        where('userId', '==', currentUser.uid)
-      );
-      const querySnap = await getDocs(q);
-      const temp: { id: string; name: string }[] = [];
-      querySnap.forEach(docSnap => {
-        const data = docSnap.data();
-        temp.push({
-          id: docSnap.id,
-          name: data?.name || 'Unnamed'
-        });
-      });
-      setChatsList(temp);
+      await logout();
+      router.replace('/'); // Redirige a la pantalla de bienvenida
     } catch (error) {
-      console.log("Error al cargar la lista de chats:", error);
+      console.error('Error during logout:', error);
     }
   };
 
-  /** Abre/cierra el drawer lateral */
+  // Abre un chat existente utilizando la función del DataContext
+  const openChat = async (id: string) => {
+    setDrawerOpen(false);
+    setChatDropdownOpen(false);
+    await selectChat(id);
+  };
+
+  // Crea un nuevo chat utilizando la función del DataContext
+  const handleNewChat = () => {
+    createNewChat();
+    setDrawerOpen(false);
+  };
+
   const toggleDrawer = () => {
     setDrawerOpen(!drawerOpen);
   };
 
-  /** Despliega/oculta la lista de chats */
   const toggleChatDropdown = () => {
     setChatDropdownOpen(!chatDropdownOpen);
   };
 
-  /** Botón "Back" para regresar a la pantalla inicial */
   const goBack = () => {
     router.push('/');
   };
 
-  /** Crea un nuevo chat local (sin guardarlo aún en Firestore).
-   *  Si el usuario no envía mensaje, el doc nunca se creará.
-   */
-  const handleNewChat = () => {
-    const newId = "chat_" + Date.now();
-    setChatId(newId);
-    setMessages([]);
-    setDrawerOpen(false);
-    console.log(`Nuevo chat local con id ${newId} (no creado en Firestore aún)`);
-  };
-
-  /** Abre un chat existente de la lista, cargando sus mensajes de Firestore */
-  const openChat = async (id: string) => {
-    try {
-      setDrawerOpen(false);
-      setChatDropdownOpen(false);
-      setChatId(id);
-      const chatRef = doc(db, "chats", id);
-      const snap = await getDoc(chatRef);
-      if (snap.exists()) {
-        const data = snap.data();
-        const loadedMessages = data?.messages || [];
-        setMessages(loadedMessages);
-        console.log(`Chat ${id} cargado con ${loadedMessages.length} mensajes`);
-      } else {
-        setMessages([]);
-        console.log(`El chat ${id} no existe en Firestore, creando vacío...`);
-        await setDoc(chatRef, {
-          name: "Unnamed Chat",
-          created_at: serverTimestamp(),
-          messages: [],
-          userId: currentUser ? currentUser.uid : null
-        });
-      }
-    } catch (error) {
-      console.log("Error al abrir chat:", error);
-    }
-  };
-
-  /**
-   * Envía el mensaje del usuario:
-   * - Si el chat no existe en Firestore, lo crea (agregando userId).
-   * - Luego agrega el mensaje al doc.
-   * - Finalmente, llama a la API para obtener la respuesta del bot.
-   */
+  // Envía mensaje usando la función centralizada del DataContext
   const handleSend = async () => {
-    if (!inputText.trim()) return;
-    if (!chatId) {
-      console.log("No hay chatId seleccionado");
-      return;
-    }
-
-    const userMessage: Message = {
-      text: inputText.trim(),
-      sender_by: "Me",
-      date: new Date(),
-      state: "Viewed"
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    if (!inputText.trim() || !currentChatId) return;
+    await sendMessage(inputText);
     setInputText("");
-
-    try {
-      const chatRef = doc(db, "chats", chatId);
-      const snap = await getDoc(chatRef);
-      if (!snap.exists()) {
-        await setDoc(chatRef, {
-          name: `Chat ${new Date().toISOString()}`,
-          created_at: serverTimestamp(),
-          messages: [userMessage],
-          userId: currentUser ? currentUser.uid : null
-        });
-        console.log(`Chat ${chatId} creado en Firestore con primer mensaje`);
-        loadAllChats();
-      } else {
-        await updateDoc(chatRef, {
-          messages: arrayUnion(userMessage)
-        });
-      }
-    } catch (error) {
-      console.log("Error al guardar mensaje en Firestore:", error);
-    }
-
-    await getResponse(userMessage.text);
+    await getResponse(inputText.trim());
   };
 
-  /**
-   * Llamada a la API para obtener la respuesta del bot,
-   * renderizada en Markdown.
-   */
+  // Función para obtener respuesta del bot (manteniendo la lógica actual)
   const getResponse = async (userMessage: string) => {
-    if (!chatId) return;
+    if (!currentChatId) return;
     try {
       setIsLoading(true);
       const response = await fetch(
@@ -222,7 +109,6 @@ export default function PrincipalScreen() {
         }
       );
       const data: APIResponse = await response.json();
-      console.log("API data:", data);
       const botText =
         data?.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
       const botMessage: Message = {
@@ -232,7 +118,7 @@ export default function PrincipalScreen() {
         state: "Received"
       };
       setMessages((prev) => [...prev, botMessage]);
-      const chatRef = doc(db, "chats", chatId);
+      const chatRef = doc(db, "chats", currentChatId);
       await updateDoc(chatRef, {
         messages: arrayUnion(botMessage)
       });
@@ -243,16 +129,19 @@ export default function PrincipalScreen() {
     }
   };
 
+  const formatDate = (dateValue: any) => {
+    if (dateValue instanceof Date) {
+      return dateValue.toLocaleTimeString();
+    } else if (dateValue && typeof dateValue.toDate === 'function') {
+      return dateValue.toDate().toLocaleTimeString();
+    } else {
+      return new Date(dateValue).toLocaleTimeString();
+    }
+  };
+
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: '#343541' }}
-      edges={['top', 'left', 'right']}
-    >
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
-      >
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#343541' }} edges={['top', 'left', 'right']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0}>
         <View style={styles.container}>
           {/* Barra superior */}
           <View style={styles.topBar}>
@@ -268,7 +157,6 @@ export default function PrincipalScreen() {
             {/* Sidebar */}
             {drawerOpen && (
               <View style={styles.drawer}>
-                {/* Dropdown "Chat" */}
                 <TouchableOpacity style={styles.drawerItem} onPress={toggleChatDropdown}>
                   <Text style={styles.drawerItemText}>
                     Chat {chatDropdownOpen ? '▼' : '▶'}
@@ -312,7 +200,8 @@ export default function PrincipalScreen() {
                   <Text style={styles.drawerItemText}>Updates & FAQ</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.drawerItem}>
+                {/* Botón Logout */}
+                <TouchableOpacity style={styles.drawerItem} onPress={handleLogout}>
                   <Text style={styles.drawerItemText}>Logout</Text>
                 </TouchableOpacity>
               </View>
@@ -366,7 +255,6 @@ export default function PrincipalScreen() {
   );
 }
 
-/** Estilos */
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#343541' },
   container: { flex: 1, backgroundColor: "#343541" },
