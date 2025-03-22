@@ -1,4 +1,3 @@
-// app/_layout.tsx
 import React from 'react';
 import { AuthProvider } from '../context/AuthContext';
 import { DataProvider } from '../context/DataContext';

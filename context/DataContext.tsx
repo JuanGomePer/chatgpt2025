@@ -1,4 +1,3 @@
-// app/context/DataContext.tsx
 import React, { createContext, useState, useEffect, ReactNode, useContext } from 'react';
 import {
   collection,
