@@ -3,7 +3,7 @@ import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getApp } from 'firebase/app';
 
 interface AuthContextProps {
-  currentUser: any; // Puedes tipar con firebase.User si importas el tipo
+  currentUser: any; 
   logout: () => Promise<void>;
 }
 
@@ -31,7 +31,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       await logout();
       console.log('User logged out');
-      // Aquí puedes manejar redirección si es necesario
     } catch (error) {
       console.error('Error during logout:', error);
     }
